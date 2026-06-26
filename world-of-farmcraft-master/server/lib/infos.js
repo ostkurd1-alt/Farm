@@ -1,326 +1,263 @@
-var db = require("./db");
-var globalSettings = require("./settings");
+import { query } from './db.js';
+import globalSettings from './settings.js';
 
-var data = new Array();
+const userData = {};
 
-
-function initData(user_id, email) {
-	data[user_id] = {};
-	data[user_id].id = user_id;
-	data[user_id].email = email;
-	data[user_id].life = null;
-	data[user_id].life_max = null;
-	data[user_id].money = null;
-	data[user_id].tiles_owned = null;
-	data[user_id].level = null;
-	data[user_id].alliance = null;
-	
-	data[user_id].map = {};
-	data[user_id].map.min_x = null;
-	data[user_id].map.min_y = null;
-	data[user_id].map.max_x = null;
-	data[user_id].map.max_y = null;
-	data[user_id].map.angle = null;
-	
-	data[user_id].character = {};
-	data[user_id].character.x = null;
-	data[user_id].character.y = null;
-	data[user_id].character.previous_x = null;
-	data[user_id].character.previous_y = null;
-	data[user_id].character.shift_x = 0;
-	data[user_id].character.shift_y = 0;
-	data[user_id].character.angle = 0;
-	data[user_id].character.leg = 1;
-	
-	data[user_id].weapon = {};
-	data[user_id].weapon.fork = false;
-	data[user_id].weapon.baseballBat = false;
-	data[user_id].weapon.chainsaw = false;
-	data[user_id].weapon.ak47 = false;
+function initData(userId, email) {
+  userData[userId] = {
+    id: userId,
+    email: email,
+    life: null,
+    life_max: null,
+    money: null,
+    tiles_owned: null,
+    level: null,
+    alliance: null,
+    map: {
+      min_x: null,
+      min_y: null,
+      max_x: null,
+      max_y: null,
+      angle: null
+    },
+    character: {
+      x: null,
+      y: null,
+      previous_x: null,
+      previous_y: null,
+      shift_x: 0,
+      shift_y: 0,
+      angle: 0,
+      leg: 1
+    },
+    weapon: {
+      fork: false,
+      baseballBat: false,
+      chainsaw: false,
+      ak47: false
+    }
+  };
 }
 
-function setMapData(user_id, mapData) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].map.min_x = mapData.min_x;
-	data[user_id].map.min_y = mapData.min_y;
-	data[user_id].map.max_x = mapData.max_x;
-	data[user_id].map.max_y = mapData.max_y;
-	data[user_id].map.angle = mapData.angle;
+function validateUserId(userId) {
+  return userId !== undefined && userId !== null && Number.isInteger(Number(userId));
 }
 
-function updateMapPosition(user_id, mapData) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].map.max_x = mapData.x+(data[user_id].map.max_x-data[user_id].map.min_x);
-	data[user_id].map.max_y = mapData.y+(data[user_id].map.max_y-data[user_id].map.min_y);
-	data[user_id].map.min_x = mapData.x;
-	data[user_id].map.min_y = mapData.y;
+function setMapData(userId, mapData) {
+  if (!userData[userId]) return;
+  Object.assign(userData[userId].map, mapData);
 }
 
-function setMapAngle(user_id, angle) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].map.angle = angle;
+function updateMapPosition(userId, mapData) {
+  if (!userData[userId]) return;
+  const current = userData[userId].map;
+  current.max_x = mapData.x + (current.max_x - current.min_x);
+  current.max_y = mapData.y + (current.max_y - current.min_y);
+  current.min_x = mapData.x;
+  current.min_y = mapData.y;
 }
 
-function setCharacterData(user_id, characterData) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].character.x = characterData.x;
-	data[user_id].character.y = characterData.y;
-	data[user_id].character.previous_x = characterData.previous_x;
-	data[user_id].character.previous_y = characterData.previous_y;
-
-	data[user_id].character.shift_x = (characterData.shift_x!=undefined)?characterData.shift_x:0;
-	data[user_id].character.shift_y = (characterData.shift_y!=undefined)?characterData.shift_y:0;
-	
-	data[user_id].character.angle = (characterData.angle!=undefined)?characterData.angle:1;
-	data[user_id].character.leg = (characterData.leg!=undefined)?characterData.leg:1;
+function setMapAngle(userId, angle) {
+  if (!userData[userId]) return;
+  userData[userId].map.angle = angle;
 }
 
-function setCharacterPosition(user_id, x, y) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].character.x = x;
-	data[user_id].character.y = y;
-	
-	this.resetCharacterShift(user_id);
+function setCharacterData(userId, characterData) {
+  if (!userData[userId]) return;
+  const char = userData[userId].character;
+  char.x = characterData.x;
+  char.y = characterData.y;
+  char.previous_x = characterData.previous_x;
+  char.previous_y = characterData.previous_y;
+  char.shift_x = characterData.shift_x ?? 0;
+  char.shift_y = characterData.shift_y ?? 0;
+  char.angle = characterData.angle ?? 1;
+  char.leg = characterData.leg ?? 1;
 }
 
-function resetCharacterShift(user_id) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].character.shift_x = 0;
-	data[user_id].character.shift_y = 0;
+function setCharacterPosition(userId, x, y) {
+  if (!userData[userId]) return;
+  userData[userId].character.x = x;
+  userData[userId].character.y = y;
+  resetCharacterShift(userId);
 }
 
-function updateCharacterShift(user_id, x, y) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].character.shift_x += x;
-	data[user_id].character.shift_y += y;
+function resetCharacterShift(userId) {
+  if (!userData[userId]) return;
+  userData[userId].character.shift_x = 0;
+  userData[userId].character.shift_y = 0;
 }
 
-function setCharacterLeg(user_id, leg) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].character.leg = leg;
+function updateCharacterShift(userId, x, y) {
+  if (!userData[userId]) return;
+  userData[userId].character.shift_x += x;
+  userData[userId].character.shift_y += y;
 }
 
-function updateCharacterLeg(user_id) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].character.leg = (data[user_id].character.leg+1)%4;
+function setCharacterLeg(userId, leg) {
+  if (!userData[userId]) return;
+  userData[userId].character.leg = leg;
 }
 
-function setCharacterAngle(user_id, angle) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].character.angle = angle;
+function updateCharacterLeg(userId) {
+  if (!userData[userId]) return;
+  userData[userId].character.leg = (userData[userId].character.leg + 1) % 4;
 }
 
-function getData(user_id) {
-	return (data[user_id]!=undefined)?data[user_id]:null;
+function setCharacterAngle(userId, angle) {
+  if (!userData[userId]) return;
+  userData[userId].character.angle = angle;
 }
 
-function getMapData(user_id) {
-	if(data[user_id]==undefined) {
-		return null;
-	}
-	
-	return data[user_id].map;
+function getData(userId) {
+  return userData[userId] ?? null;
 }
 
-function getMapAngle(user_id) {
-	if(data[user_id]==undefined) {
-		return null;
-	}
-	
-	return data[user_id].map.angle;
+function getMapData(userId) {
+  return userData[userId]?.map ?? null;
 }
 
-function getCharacterData(user_id) {
-	if(data[user_id]==undefined) {
-		return null;
-	}
-	
-	return data[user_id].character;
+function getMapAngle(userId) {
+  return userData[userId]?.map?.angle ?? null;
 }
 
-function getEmail(user_id) {
-	if(data[user_id]==undefined) {
-		return null;
-	}
-	
-	return data[user_id].email;
+function getCharacterData(userId) {
+  return userData[userId]?.character ?? null;
 }
 
-function getInformations(socket) {
-	// On vérifie que l'on dispose des bonnes informations utilisateur
-	var user_id = socket.handshake.user_id;
-	if(user_id==undefined || user_id==null || parseInt(user_id)!=user_id) {
-		socket.emit('error', {invalidSession: true});
-		return;
-	}
-	
-	// On essaye de récupérer sa position
-	connection = db.getConnection();
-	connection.query('SELECT * FROM wof_user_informations WHERE id_user='+user_id, function(error, rows, fields) {
-		if(error) {
-			console.log('Database error on retrieving informations');
-			console.log(error);
-
-			// On envoi l'erreur
-			socket.emit('getInformationsAnswer', {error:'Database error on retrieving informations'});
-			return;
-		}
-		else if(rows.length==0) {
-			console.log('No informations available..');
-			socket.emit('getInformationsAnswer', {error:'No informations available..'});
-			return;
-		}
-		else if(data[user_id]!=undefined) {
-			data[user_id].life = rows[0].life;
-			data[user_id].money = rows[0].money;
-			data[user_id].tiles_owned = rows[0].tiles_owned;
-			determineLevel(user_id, rows[0].tiles_owned);
-			data[user_id].alliance = rows[0].id_alliance;
-			
-			socket.emit('getInformationsAnswer', {'life_max':data[user_id].life_max, 'life':rows[0].life, 'money':rows[0].money, 'level':data[user_id].level});
-			return;
-		}
-	});
+function getEmail(userId) {
+  return userData[userId]?.email ?? null;
 }
 
-function getOwnedWeapon(socket) {
-	// On vérifie que l'on dispose des bonnes informations utilisateur
-	var user_id = socket.handshake.user_id;
-	if(user_id==undefined || user_id==null || parseInt(user_id)!=user_id) {
-		socket.emit('error', {invalidSession: true});
-		return;
-	}
-	
-	// On essaye de récupérer ses possessions d'arme
-	connection = db.getConnection();
-	connection.query('SELECT w.name FROM wof_user_weapon uw LEFT JOIN wof_weapon_type w ON(uw.id_weapon_type=w.id_weapon_type) WHERE uw.id_user='+user_id, function(error, rows, fields) {
-		if(error) {
-			console.log('Database error on retrieving owned weapons');
-			console.log(error);
+async function getInformations(socket) {
+  const userId = socket.handshake.user_id;
 
-			// On envoi l'erreur
-			socket.emit('getOwnedWeaponAnswer', {error:'Database error on retrieving owned weapons'});
-			return;
-		}
-		else if(data[user_id]!=undefined) {
-			for(i in rows) {
-				data[user_id].weapon[rows[i].name] = true;
-			}
-			
-			socket.emit('getOwnedWeaponAnswer', data[user_id].weapon);
-			return;
-		}
-	});
+  if (!validateUserId(userId)) {
+    socket.emit('error', { invalidSession: true });
+    return;
+  }
+
+  try {
+    const rows = await query(
+      'SELECT * FROM wof_user_informations WHERE id_user = ? LIMIT 1',
+      [userId]
+    );
+
+    if (rows.length === 0) {
+      socket.emit('getInformationsAnswer', { error: 'No informations available' });
+      return;
+    }
+
+    if (userData[userId]) {
+      userData[userId].life = rows[0].life;
+      userData[userId].money = rows[0].money;
+      userData[userId].tiles_owned = rows[0].tiles_owned;
+      userData[userId].alliance = rows[0].id_alliance;
+      determineLevel(userId, rows[0].tiles_owned);
+
+      socket.emit('getInformationsAnswer', {
+        life_max: userData[userId].life_max,
+        life: rows[0].life,
+        money: rows[0].money,
+        level: userData[userId].level
+      });
+    }
+
+  } catch (error) {
+    console.error('Database error on retrieving informations:', error);
+    socket.emit('getInformationsAnswer', { error: 'Database error on retrieving informations' });
+  }
 }
 
-function determineLevel(user_id, total) {
-	// On va répartir les niveaux par tranches de 20 cases possédées
-	var initialOwnedTilesDepth = globalSettings.getInitialOwnedTilesDepth();
-	var tmp = Math.ceil((total-(initialOwnedTilesDepth*initialOwnedTilesDepth))/20)+1;
-	
-	if(tmp<1) {
-		data[user_id].level = 1;
-	}
-	else {
-		data[user_id].level = tmp;
-	}
-	
-	// On en profite pour re-calculer le nombre de points de vie maximum
-	data[user_id].life_max = data[user_id].level*globalSettings.getInitialLife();
+async function getOwnedWeapon(socket) {
+  const userId = socket.handshake.user_id;
+
+  if (!validateUserId(userId)) {
+    socket.emit('error', { invalidSession: true });
+    return;
+  }
+
+  try {
+    const rows = await query(
+      'SELECT w.name FROM wof_user_weapon uw LEFT JOIN wof_weapon_type w ON (uw.id_weapon_type = w.id_weapon_type) WHERE uw.id_user = ?',
+      [userId]
+    );
+
+    if (userData[userId]) {
+      for (const row of rows) {
+        userData[userId].weapon[row.name] = true;
+      }
+      socket.emit('getOwnedWeaponAnswer', userData[userId].weapon);
+    }
+
+  } catch (error) {
+    console.error('Database error on retrieving owned weapons:', error);
+    socket.emit('getOwnedWeaponAnswer', { error: 'Database error on retrieving owned weapons' });
+  }
 }
 
-function getAlliance(user_id) {
-	if(data[user_id]==undefined) {
-		return null;
-	}
-	
-	return data[user_id].alliance;
+function determineLevel(userId, total) {
+  if (!userData[userId]) return;
+
+  const initialOwnedTilesDepth = globalSettings.getInitialOwnedTilesDepth();
+  const level = Math.max(1, Math.ceil((total - (initialOwnedTilesDepth * initialOwnedTilesDepth)) / 20) + 1);
+
+  userData[userId].level = level;
+  userData[userId].life_max = level * globalSettings.getInitialLife();
 }
 
-function getMoney(user_id) {
-	if(data[user_id]==undefined) {
-		return 0;
-	}
-	
-	return data[user_id].money;
+function getAlliance(userId) {
+  return userData[userId]?.alliance ?? null;
 }
 
-function decreaseMoney(socket, user_id, amount) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].money -= amount;
-	
-	// On envoi l'information uniquement si le joueur est connecté
-	if(socket!=null) {
-		socket.emit('getInformationsAnswer', {'life_max':data[user_id].life_max, 'life':data[user_id].life, 'money':data[user_id].money, 'level':data[user_id].level});
-	}
+function getMoney(userId) {
+  return userData[userId]?.money ?? 0;
 }
 
-function increaseMoney(socket, user_id, amount) {
-	if(data[user_id]==undefined) {
-		return;
-	}
-	
-	data[user_id].money += amount;
-	
-	// On envoi l'information uniquement si le joueur est connecté
-	if(socket!=null) {
-		socket.emit('getInformationsAnswer', {'life_max':data[user_id].life_max, 'life':data[user_id].life, 'money':data[user_id].money, 'level':data[user_id].level});
-	}
+function decreaseMoney(socket, userId, amount) {
+  if (!userData[userId]) return;
+  userData[userId].money -= amount;
+  notifyMoneyChange(socket, userId);
 }
 
+function increaseMoney(socket, userId, amount) {
+  if (!userData[userId]) return;
+  userData[userId].money += amount;
+  notifyMoneyChange(socket, userId);
+}
 
-exports.initData = initData;
-exports.setMapData = setMapData;
-exports.setMapAngle = setMapAngle;
-exports.setCharacterData = setCharacterData;
-exports.setCharacterPosition = setCharacterPosition;
-exports.resetCharacterShift = resetCharacterShift;
-exports.updateCharacterShift = updateCharacterShift;
-exports.setCharacterLeg = setCharacterLeg;
-exports.updateCharacterLeg = updateCharacterLeg;
-exports.setCharacterAngle = setCharacterAngle;
-exports.getData = getData;
-exports.getMapData = getMapData;
-exports.getMapAngle = getMapAngle;
-exports.getCharacterData = getCharacterData;
-exports.getEmail = getEmail;
-exports.getInformations = getInformations;
-exports.getAlliance = getAlliance;
-exports.getMoney = getMoney;
-exports.decreaseMoney = decreaseMoney;
-exports.increaseMoney = increaseMoney;
-exports.getOwnedWeapon = getOwnedWeapon;
-exports.updateMapPosition = updateMapPosition;
+function notifyMoneyChange(socket, userId) {
+  if (socket && userData[userId]) {
+    socket.emit('getInformationsAnswer', {
+      life_max: userData[userId].life_max,
+      life: userData[userId].life,
+      money: userData[userId].money,
+      level: userData[userId].level
+    });
+  }
+}
+
+export default {
+  initData,
+  setMapData,
+  setMapAngle,
+  setCharacterData,
+  setCharacterPosition,
+  resetCharacterShift,
+  updateCharacterShift,
+  setCharacterLeg,
+  updateCharacterLeg,
+  setCharacterAngle,
+  getData,
+  getMapData,
+  getMapAngle,
+  getCharacterData,
+  getEmail,
+  getInformations,
+  getAlliance,
+  getMoney,
+  decreaseMoney,
+  increaseMoney,
+  getOwnedWeapon,
+  updateMapPosition
+};

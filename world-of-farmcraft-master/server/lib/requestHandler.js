@@ -1,347 +1,448 @@
-var crypto = require('crypto');
-var path = require('path');
-var fs = require('fs');
-var mail = require('./mail');
-var db = require('./db');
-var settings = require('./settings');
-var map = require('./map');
-var connection = null;
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
+import validator from 'validator';
+import { query } from './db.js';
+import mail from './mail.js';
+import settings from './settings.js';
+import map from './map.js';
 
-function start(req, res, postData) {
-	
-	// On vérifie si l'utilisateur n'est pas déjà connecté
-	if(validateEmail(req.session.data.user) && parseInt(req.session.data.id)==req.session.data.id) {
-		// On redirige notre utilisateur vers la page de jeu
-		res.writeHead(302, {'Location': '/play', 'Content-Type': 'text/html'});
-		res.end('<a href="/play">Redirecting to the game...</a>');
-		return;
-	}
-	
-	// On vérifie si l'on a transmit des données correctes depuis le formulaire
-	if (postData.email===undefined || postData.email===null || postData.password===undefined || postData.password===null || !validateEmail(postData.email)) {
-		// Il manque des données ou l'email est invalide
-		removePrivileges(req, res);
-	}
-	else {
-		// Enfin, on interroge la base de données pour savoir si cet utilisateur existe
-		connection = db.getConnection();
-		connection.query('SELECT * FROM wof_user WHERE email="'+postData.email+'" AND password="'+hash(postData.password)+'"', function(error, rows, fields) {
-			if(error) {
-				console.log('Database error on login');
-				removePrivileges(req, res);
-			}
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-			if(rows.length==0) {
-				console.log('Bad auth..');
-				removePrivileges(req, res);
-			}
-			else {
-				// Notre utilisateur est valide!
-				console.log('Connection: '+rows[0].email+' is now logged.');
-				
-				// On retient ses identifiants
-				req.session.data.user = rows[0].email;
-				req.session.data.id = rows[0].id_user;
+const SALT_ROUNDS = 12;
+const RECOVERY_TOKEN_BYTES = 32;
 
-				// On redirige notre utilisateur vers la page de jeu
-				res.writeHead(302, {'Location': '/play', 'Content-Type': 'text/html'});
-				res.end('<a href="/play">Redirecting to the game...</a>');
-			}
-		});
-	}
+// حماية من Brute Force - تتبع محاولات تسجيل الدخول
+const loginAttempts = new Map();
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_TIME = 15 * 60 * 1000; // 15 دقيقة
+
+function isLockedOut(email) {
+  const attempts = loginAttempts.get(email);
+  if (!attempts) return false;
+
+  if (attempts.count >= MAX_LOGIN_ATTEMPTS) {
+    const timePassed = Date.now() - attempts.lastAttempt;
+    if (timePassed < LOCKOUT_TIME) {
+      return true;
+    }
+    loginAttempts.delete(email);
+  }
+  return false;
 }
 
-function userExists(req, res, postData) {
-	// On vérifie si l'on a transmit des données correctes depuis le formulaire
-	if (postData.email===undefined || postData.email===null || !validateEmail(postData.email)) {
-		// Il manque des données
-		res.writeHead(200, {"Content-Type": "text/plain"});
-		res.end('false');
-	}
-	else {
-		// Enfin, on interroge la base de données pour savoir si cet utilisateur existe
-		connection = db.getConnection();
-		connection.query('SELECT id_user FROM wof_user WHERE email="'+postData.email+'"', function(error, rows, fields) {
-			if (error || rows.length==0) {
-				res.writeHead(200, {"Content-Type": "text/plain"});
-				res.end('false');
-			}
-			else {
-				res.writeHead(200, {"Content-Type": "text/plain"});
-				res.end('true');
-			}
-		});
-	}
+function recordAttempt(email) {
+  const attempts = loginAttempts.get(email) || { count: 0, lastAttempt: 0 };
+  attempts.count++;
+  attempts.lastAttempt = Date.now();
+  loginAttempts.set(email, attempts);
 }
 
-function userCredentials(req, res, postData) {
-	// On vérifie si l'on a transmit des données correctes depuis le formulaire
-	if (postData.email===undefined || postData.email===null || !validateEmail(postData.email) || postData.password===undefined || postData.password===null) {
-		// Il manque des données
-		res.writeHead(200, {"Content-Type": "text/plain"});
-		res.end('false');
-	}
-	else {
-		// Enfin, on interroge la base de données pour savoir si cet utilisateur existe
-		connection = db.getConnection();
-		connection.query('SELECT id_user FROM wof_user WHERE email="'+postData.email+'" AND password="'+hash(postData.password)+'"', function(error, rows, fields) {
-			if (error || rows.length==0) {
-				res.writeHead(200, {"Content-Type": "text/plain"});
-				res.end('false');
-			}
-			else {
-				res.writeHead(200, {"Content-Type": "text/plain"});
-				res.end('true');
-			}
-		});
-	}
+function clearAttempts(email) {
+  loginAttempts.delete(email);
 }
 
-function register(req, res, postData) {
-	
-	// On vérifie si l'on a transmit des données correctes depuis le formulaire
-	if (postData.email===undefined || postData.email===null || postData.password===undefined || postData.password===null || postData.confirmationPassword===undefined || 
-	postData.confirmationPassword===null || postData.difficulty===undefined || postData.difficulty===null) {
-		
-		// On redirige l'utilisateur sur le formulaire de connexion
-		res.writeHead(302, {'Location': '/', 'Content-Type': 'text/html'});
-		res.end('<a href="/">Redirecting to the register form...</a>');
-	}
-	
-	// On vérifie à présent si l'adresse email ne contient pas de caractères interdits
-	else if(!validateEmail(postData.email)) {
-		// L'email est invalide
-		removePrivileges(req, res);
-	}
-	
-	// Le mot de pass est-il vide?
-	else if(postData.password=='') {
-		// Oui...
-		removePrivileges(req, res);
-	}
-	
-	// Les mots de pass correspondent-ils?
-	else if(postData.password!=postData.confirmationPassword) {
-		// Non...
-		removePrivileges(req, res);
-	}
-	
-	// La difficulté choisie est-elle connue?
-	else if(postData.difficulty!='easy' && postData.difficulty!='medium' && postData.difficulty!='hard') {
-		// Non...
-		removePrivileges(req, res);
-	}
-	
-	// Tout semble correct
-	// On vérifie à présent si cet utilisateur possède déjà un compte en base de données
-	else {
-		var connection = db.getConnection();
-		connection.query('SELECT id_user FROM wof_user WHERE email="'+postData.email+'"', function(error, rows, fields) {
-			if(error) {
-				console.log('Database error on checking registration');
-				removePrivileges(req, res);
-			}
-
-			if(rows.length>0) {
-				// Cet utlisateur possède déjà un compte..
-				console.log('Error: '+postData.email+' is already a member and therefore cannot register again..');
-
-				removePrivileges(req, res);
-			}
-			else {
-				// On peut à présent enregistrer notre utilisateur
-				connection = db.getConnection();
-				connection.query('INSERT INTO wof_user(email, password, difficulty, life, money) VALUES("'+postData.email+'", "'+hash(postData.password)+'", "'+postData.difficulty+'", '+settings.getInitialLife()+', '+settings.getInitialMoneyByDifficulty(postData.difficulty)+')', function(error, rows, fields) {
-					if(error) {
-						console.log('Database error on register');
-						removePrivileges(req, res);
-					}
-					else {
-						console.log('Register: '+postData.email+' is now registered!');
-						
-						// On identifie l'utilisateur
-						req.session.data.user = postData.email;
-						req.session.data.id = rows.insertId;
-						
-						// On va allouer un territoire à cet utilisateur
-						map.allocateTerritory(rows.insertId, res);
-					}
-				});
-			}
-		});
-	}
-}
-
+/**
+ * التحقق من صحة البريد الإلكتروني
+ */
 function validateEmail(email) {
-	var regex = /^[-a-zA-Z0-9._+]+@[-a-zA-Z0-9._+]+$/;
-	return regex.test(email);
+  if (!email || typeof email !== 'string') return false;
+  return validator.isEmail(email) && email.length <= 100;
 }
 
+/**
+ * التحقق من قوة كلمة المرور
+ */
+function validatePassword(password) {
+  if (!password || typeof password !== 'string') return false;
+  return password.length >= 6 && password.length <= 100;
+}
+
+/**
+ * التحقق من صحة التوكن
+ */
 function validateToken(token) {
-	var regex = /^[a-z0-9]{32}$/;
-	return regex.test(token);
+  if (!token || typeof token !== 'string') return false;
+  return /^[a-f0-9]{64}$/.test(token);
 }
 
-function hash(data) {
-	var salt = 'J01n U5 n0w 4n|} 5H4|23 7H3 50f7w4|23; Y0U w1LL 83 f|233, H4CK3|25, y0U w1LL 83 f|233.';
-	return crypto.createHash('md5').update(data+salt).digest('hex');
+/**
+ * تشفير كلمة المرور باستخدام bcrypt
+ */
+async function hashPassword(password) {
+  return await bcrypt.hash(password, SALT_ROUNDS);
 }
 
+/**
+ * التحقق من كلمة المرور
+ */
+async function verifyPassword(password, hash) {
+  return await bcrypt.compare(password, hash);
+}
+
+/**
+ * توليد توكن آمن
+ */
+function generateToken() {
+  return crypto.randomBytes(RECOVERY_TOKEN_BYTES).toString('hex');
+}
+
+/**
+ * تسجيل الدخول
+ */
+async function start(req, res, postData) {
+  try {
+    // التحقق من الجلسة الحالية
+    if (req.session?.user?.id && validateEmail(req.session.user.email)) {
+      return res.redirect('/play');
+    }
+
+    const email = postData?.email?.trim().toLowerCase();
+    const password = postData?.password;
+
+    // التحقق من المدخلات
+    if (!validateEmail(email) || !password) {
+      return removePrivileges(req, res);
+    }
+
+    // التحقق من الحظر
+    if (isLockedOut(email)) {
+      console.log(`Account temporarily locked: ${email}`);
+      return removePrivileges(req, res);
+    }
+
+    // البحث عن المستخدم
+    const rows = await query(
+      'SELECT id_user, email, password FROM wof_user WHERE email = ? LIMIT 1',
+      [email]
+    );
+
+    if (rows.length === 0) {
+      recordAttempt(email);
+      return removePrivileges(req, res);
+    }
+
+    const user = rows[0];
+
+    // التحقق من كلمة المرور
+    const isValid = await verifyPassword(password, user.password);
+
+    if (!isValid) {
+      recordAttempt(email);
+      return removePrivileges(req, res);
+    }
+
+    // تسجيل الدخول الناجح
+    clearAttempts(email);
+
+    req.session.user = {
+      id: user.id_user,
+      email: user.email
+    };
+
+    console.log(`Login successful: ${email}`);
+    return res.redirect('/play');
+
+  } catch (error) {
+    console.error('Login error:', error);
+    return removePrivileges(req, res);
+  }
+}
+
+/**
+ * التحقق من وجود المستخدم
+ */
+async function userExists(req, res, postData) {
+  try {
+    const email = postData?.email?.trim().toLowerCase();
+
+    if (!validateEmail(email)) {
+      return res.send('false');
+    }
+
+    const rows = await query(
+      'SELECT id_user FROM wof_user WHERE email = ? LIMIT 1',
+      [email]
+    );
+
+    res.send(rows.length > 0 ? 'true' : 'false');
+
+  } catch (error) {
+    console.error('userExists error:', error);
+    res.send('false');
+  }
+}
+
+/**
+ * التحقق من صحة بيانات الاعتماد
+ */
+async function userCredentials(req, res, postData) {
+  try {
+    const email = postData?.email?.trim().toLowerCase();
+    const password = postData?.password;
+
+    if (!validateEmail(email) || !password) {
+      return res.send('false');
+    }
+
+    if (isLockedOut(email)) {
+      return res.send('false');
+    }
+
+    const rows = await query(
+      'SELECT id_user, password FROM wof_user WHERE email = ? LIMIT 1',
+      [email]
+    );
+
+    if (rows.length === 0) {
+      return res.send('false');
+    }
+
+    const isValid = await verifyPassword(password, rows[0].password);
+
+    if (!isValid) {
+      recordAttempt(email);
+      return res.send('false');
+    }
+
+    res.send('true');
+
+  } catch (error) {
+    console.error('userCredentials error:', error);
+    res.send('false');
+  }
+}
+
+/**
+ * تسجيل مستخدم جديد
+ */
+async function register(req, res, postData) {
+  try {
+    const email = postData?.email?.trim().toLowerCase();
+    const password = postData?.password;
+    const confirmationPassword = postData?.confirmationPassword;
+    const difficulty = postData?.difficulty;
+
+    // التحقق من المدخلات
+    if (!validateEmail(email) || !validatePassword(password)) {
+      return removePrivileges(req, res);
+    }
+
+    if (password !== confirmationPassword) {
+      return removePrivileges(req, res);
+    }
+
+    const validDifficulties = ['easy', 'medium', 'hard'];
+    if (!validDifficulties.includes(difficulty)) {
+      return removePrivileges(req, res);
+    }
+
+    // التحقق من عدم وجود المستخدم مسبقاً
+    const existingUsers = await query(
+      'SELECT id_user FROM wof_user WHERE email = ? LIMIT 1',
+      [email]
+    );
+
+    if (existingUsers.length > 0) {
+      console.log(`Registration failed: ${email} already exists`);
+      return removePrivileges(req, res);
+    }
+
+    // تشفير كلمة المرور وإنشاء المستخدم
+    const hashedPassword = await hashPassword(password);
+    const initialLife = settings.getInitialLife();
+    const initialMoney = settings.getInitialMoneyByDifficulty(difficulty);
+
+    const result = await query(
+      'INSERT INTO wof_user (email, password, difficulty, life, money) VALUES (?, ?, ?, ?, ?)',
+      [email, hashedPassword, difficulty, initialLife, initialMoney]
+    );
+
+    const userId = result.insertId;
+
+    // إنشاء الجلسة
+    req.session.user = {
+      id: userId,
+      email: email
+    };
+
+    console.log(`Registration successful: ${email}`);
+
+    // تخصيص أرض للمستخدم
+    await map.allocateTerritory(userId, res);
+
+  } catch (error) {
+    console.error('Registration error:', error);
+    return removePrivileges(req, res);
+  }
+}
+
+/**
+ * طلب استعادة كلمة المرور
+ */
+async function passwordLost(req, res, postData) {
+  try {
+    const email = postData?.email?.trim().toLowerCase();
+
+    if (!validateEmail(email)) {
+      return renderView(res, 'passwordLost');
+    }
+
+    // توليد توكن آمن
+    const token = generateToken();
+    const tokenExpiry = new Date(Date.now() + 3600000); // ساعة واحدة
+
+    // حفظ التوكن
+    await query(
+      'UPDATE wof_user SET recovery = ?, recovery_expires = ? WHERE email = ?',
+      [token, tokenExpiry, email]
+    );
+
+    // إرسال البريد
+    await mail.passwordLost(email, token);
+
+    console.log(`Password recovery requested: ${email}`);
+    renderView(res, 'passwordLostSent');
+
+  } catch (error) {
+    console.error('passwordLost error:', error);
+    renderView(res, 'passwordLost');
+  }
+}
+
+/**
+ * إعادة تعيين كلمة المرور
+ */
+async function resetPassword(req, res, postData) {
+  try {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const token = url.searchParams.get('token');
+
+    if (!validateToken(token)) {
+      console.log('Invalid reset token');
+      return res.redirect('/passwordLost');
+    }
+
+    // البحث عن المستخدم بالتوكن الصحيح
+    const rows = await query(
+      'SELECT id_user, email, recovery_expires FROM wof_user WHERE recovery = ? LIMIT 1',
+      [token]
+    );
+
+    if (rows.length === 0) {
+      console.log('Token not found');
+      return res.redirect('/passwordLost');
+    }
+
+    const user = rows[0];
+
+    // التحقق من انتهاء صلاحية التوكن
+    if (user.recovery_expires && new Date(user.recovery_expires) < new Date()) {
+      console.log('Token expired');
+      return res.redirect('/passwordLost');
+    }
+
+    const password = postData?.password;
+    const confirmationPassword = postData?.confirmationPassword;
+
+    // إذا تم إرسال كلمة مرور جديدة
+    if (password && confirmationPassword && password === confirmationPassword && validatePassword(password)) {
+      const hashedPassword = await hashPassword(password);
+
+      await query(
+        'UPDATE wof_user SET password = ?, recovery = NULL, recovery_expires = NULL WHERE id_user = ?',
+        [hashedPassword, user.id_user]
+      );
+
+      // إنشاء جلسة
+      req.session.user = {
+        id: user.id_user,
+        email: user.email
+      };
+
+      console.log(`Password reset successful: ${user.email}`);
+      return res.redirect('/play');
+    }
+
+    // عرض نموذج إعادة التعيين
+    renderView(res, 'resetPassword');
+
+  } catch (error) {
+    console.error('resetPassword error:', error);
+    return res.redirect('/passwordLost');
+  }
+}
+
+/**
+ * صفحة اللعب
+ */
 function play(req, res, postData) {
-	
-	// On vérifie que l'utilisateur est bien connecté
-	if(req.session.data.user=='anonymous' || req.session.data.id==undefined) {
-		// On redirige l'utilisateur sur le formulaire de connexion
-		res.writeHead(302, {'Location': '/', 'Content-Type': 'text/html'});
-		res.end('<a href="/">Redirecting to the login form...</a>');
-	}
-	else if(!validateEmail(req.session.data.user) || parseInt(req.session.data.id)!=req.session.data.id) {
-		removePrivileges(req, res, true);
-		
-		// On redirige l'utilisateur sur le formulaire de connexion
-		res.writeHead(302, {'Location': '/', 'Content-Type': 'text/html'});
-		res.end('<a href="/">Redirecting to the login form...</a>');
-	}
-	else {
-		// On affiche la page de jeu
-		renderView(res, 'play');
-	}
+  if (!req.session?.user?.id || !validateEmail(req.session.user.email)) {
+    return res.redirect('/');
+  }
+
+  renderView(res, 'play');
 }
 
-function passwordLost(req, res, postData) {
-	// On vérifie si l'on a correctement remplis le formulaire de re-initialisation de mot de passe
-	if(postData.email===undefined || postData.email===null || !validateEmail(postData.email)) {
-		// On affiche la page de récupération de mot de passe
-		renderView(res, 'passwordLost');
-	}
-	else {
-		// On génère un token aléatoire
-		var token = hash(postData.email+Math.random());
-		
-		// On enregistre ce dernier en base de donnée
-		var connection = db.getConnection();
-		connection.query('UPDATE wof_user SET recovery="'+token+'" WHERE email="'+postData.email+'"', function(error, rows, fields) {
-			if(error) {
-				console.log('Database error on updating recovery token');
-			}
-			else {
-				console.log('Password recovery: '+postData.email);
-			}
-		});
-		
-		mail.passwordLost(postData.email, token);
-		
-		// On affiche la page de succès d'envoi de mail
-		renderView(res, 'passwordLostSent');
-	}
-}
-
-function resetPassword(req, res, postData) {
-	// On vérifie que l'on a transmit un token correct
-	var urlParams = require('url').parse(req.url, true).query || {};
-	
-	if(typeof urlParams.token=='undefined' || !validateToken(urlParams.token)) {
-		console.log('Invalid token provided.. Can\'t show reset password form');
-
-		// On redirige notre utilisateur vers la page de re-initialisation de mot de passe
-		res.writeHead(302, {'Location': '/passwordLost', 'Content-Type': 'text/html'});
-		res.end('<a href="/play">Redirecting to the lost password form...</a>');
-	}
-	else {
-		// On vérifie que ce token est connu
-		var connection = db.getConnection();
-		connection.query('SELECT id_user, email FROM wof_user WHERE recovery="'+urlParams.token+'"', function(error, rows, fields) {
-			if(error) {
-				console.log('Database error on checking recovery token');
-				removePrivileges(req, res);
-			}
-			else if(rows.length==0) {
-				console.log('Bad token provided..');
-				
-				// On redirige l'utilisateur sur le formulaire de demande de re-initialisation
-				res.writeHead(302, {'Location': '/passwordLost', 'Content-Type': 'text/html'});
-				res.end('<a href="/">Redirecting to the lost password form...</a>');
-			}
-			
-			// On vérifie à présent si l'on a déjà remplis le formulaire
-			else if(postData.password!=undefined && postData.password!=null && postData.confirmationPassword!=undefined && postData.confirmationPassword!=null 
-					&& postData.password.length>0 && postData.password==postData.confirmationPassword) {
-				
-				// On récupère l'email de cet utilisateur
-				var email = rows[0].email;
-				var user_id = rows[0].id_user;
-				
-				// On peut à présent enregistrer notre utilisateur
-				connection = db.getConnection();
-				connection.query('UPDATE wof_user SET password="'+hash(postData.password)+'", recovery=NULL WHERE recovery="'+urlParams.token+'"', function(error, rows, fields) {
-					if(error) {
-						console.log('Database error on updating password');
-						removePrivileges(req, res);
-					}
-					else {
-						console.log('Password successfully reset for '+email);
-						
-						// On connecte notre utilisateur
-						req.session.data.user = email;
-						req.session.data.id = user_id;
-
-						// On redirige notre utilisateur vers la page de jeu
-						res.writeHead(302, {'Location': '/play', 'Content-Type': 'text/html'});
-						res.end('<a href="/play">Redirecting to the game...</a>');
-					}
-				});
-			}
-			else {
-				// On affiche le formulaire de re-initialisation de mot de passe
-				renderView(res, 'resetPassword');
-			}
-		});
-	}
-}
-
+/**
+ * تسجيل الخروج
+ */
 function logout(req, res, postData) {
-	// On supprime les privilèges
-	removePrivileges(req, res, true);
-	
-	// Puis on redirige vers l'accueil
-	console.log('Logout: '+postData.email+' has just logout');
-	
-	res.writeHead(302, {'Location': '/', 'Content-Type': 'text/html'});
-	res.end('<a href="/play">Redirecting to the index...</a>');
+  const email = req.session?.user?.email;
+
+  req.session.destroy((err) => {
+    if (err) console.error('Session destruction error:', err);
+  });
+
+  console.log(`Logout: ${email}`);
+  res.redirect('/');
 }
 
+/**
+ * إزالة الصلاحيات
+ */
 function removePrivileges(req, res, doNotRender) {
-	// On repasse notre utilisateur en anonyme si ce n'est déjà fait
-	req.session.data.user = "anonymous";
-	
-	if(doNotRender==undefined || doNotRender!=true) {
-		// Puis on affiche le formulaire de connexion
-		renderView(res, 'sign');
-	}
+  if (req.session) {
+    req.session.user = null;
+  }
+
+  if (!doNotRender) {
+    renderView(res, 'sign');
+  }
 }
 
+/**
+ * عرض صفحة HTML
+ */
 function renderView(res, file) {
-	var filename = path.join(process.cwd(), '/view/'+file+'.html');
-	fs.exists(filename, function(exists) {
-		if(!exists) {
-			console.log("Doesn't exist: " + filename);
-			res.writeHead(404, {'Content-Type': 'text/plain'});
-			res.write('404 not found..\n');
-			res.end();
-			return;
-		}
-		
-		res.writeHead(200, {'Content-Type': 'text/html'});
-		var fileStream = fs.createReadStream(filename);
-		fileStream.pipe(res);
-	});
+  const viewDir = path.join(__dirname, '..', 'view');
+  const filename = path.join(viewDir, file + '.html');
+
+  fs.access(filename, fs.constants.R_OK, (err) => {
+    if (err) {
+      console.log('View not found:', filename);
+      res.status(404).send('Page not found');
+      return;
+    }
+
+    res.sendFile(filename);
+  });
 }
 
-exports.start = start;
-exports.register = register;
-exports.passwordLost = passwordLost;
-exports.resetPassword = resetPassword;
-exports.play = play;
-exports.userExists = userExists;
-exports.userCredentials = userCredentials;
-exports.logout = logout;
+export {
+  start,
+  register,
+  passwordLost,
+  resetPassword,
+  play,
+  userExists,
+  userCredentials,
+  logout,
+  validateEmail,
+  validatePassword,
+  hashPassword,
+  verifyPassword
+};

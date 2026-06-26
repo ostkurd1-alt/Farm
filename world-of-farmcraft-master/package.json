@@ -1,7 +1,7 @@
 {
   "name": "world-of-farmcraft",
   "description": "An online multiplayer 3D isometric farm game",
-  "version": "0.8.2",
+  "version": "1.0.0",
   "contributors": [
     {
       "name": "Joey Clouvel",
@@ -9,13 +9,27 @@
       "web": "http://joeyclouvel.com"
     }
   ],
+  "main": "server/launch.js",
+  "type": "module",
   "dependencies": {
-    "socket.io": "0.9.13",
-    "mysql": "2.0.0",
-    "eyes": "0.1.8",
-    "response": "0.1.0",
-    "sesh": "0.1.0",
-    "nodemailer": "0.3.42"
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.1",
+    "express-session": "^1.17.3",
+    "helmet": "^7.1.0",
+    "mysql2": "^3.6.5",
+    "nodemailer": "^6.9.7",
+    "socket.io": "^4.6.1",
+    "uuid": "^9.0.1",
+    "validator": "^13.11.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server/launch.js",
+    "dev": "node --watch server/launch.js"
   },
   "repository": {
     "type": "git",
@@ -23,7 +37,7 @@
   },
   "licenses": [
     {
-      "name": "GPL",
+      "type": "GPL-2.0",
       "url": "https://github.com/joeyinbox/world-of-farmcraft/blob/master/LICENSE"
     }
   ],

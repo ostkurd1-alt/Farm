@@ -1,68 +1,83 @@
-var infos = require('./infos');
-var map = require('./map');
-var globalSettings = require('./settings');
+import infos from './infos.js';
+import map from './map.js';
+import globalSettings from './settings.js';
 
-var socketio;
+let io = null;
 
-
-function init(io) {
-	socketio = io;
+function init(socketIo) {
+  io = socketIo;
 }
 
 function refreshViewerMap(x, y, exception) {
-	for(s in socketio.handshaken) {
-		if(socketio.handshaken[s].user_id!=undefined && socketio.sockets.sockets[s]!=undefined && (exception==undefined || exception!=socketio.handshaken[s].user_id)) {
-			
-			// On récupère les informations de ce spectateur
-			var viewerData = infos.getMapData(socketio.handshaken[s].user_id);
-			
-			if(x>=viewerData.min_x-((viewerData.max_x-viewerData.min_x-1)/2) && x<=viewerData.max_x && y>=viewerData.min_y-((viewerData.max_y-viewerData.min_y-1)/2) && y<=viewerData.max_y) {
-				map.refreshMap(socketio.sockets.sockets[s]);
-			}
-		}
-	}
+  if (!io) return;
+
+  for (const [socketId, socket] of io.sockets.sockets) {
+    const userId = socket.handshake?.user_id;
+
+    if (userId && userId !== exception) {
+      const viewerData = infos.getMapData(userId);
+
+      if (viewerData) {
+        const halfWidth = (viewerData.max_x - viewerData.min_x - 1) / 2;
+        const halfHeight = (viewerData.max_y - viewerData.min_y - 1) / 2;
+
+        if (x >= viewerData.min_x - halfWidth && x <= viewerData.max_x &&
+            y >= viewerData.min_y - halfHeight && y <= viewerData.max_y) {
+          map.refreshMap(socket);
+        }
+      }
+    }
+  }
 }
 
 function showTornado(x, y, data) {
-	for(s in socketio.handshaken) {
-		if(socketio.handshaken[s].user_id!=undefined && socketio.sockets.sockets[s]!=undefined) {
+  if (!io) return;
 
-			// On récupère les informations de ce spectateur
-			var viewerData = infos.getMapData(socketio.handshaken[s].user_id);
+  for (const [socketId, socket] of io.sockets.sockets) {
+    const userId = socket.handshake?.user_id;
 
-			if(x>=viewerData.min_x && x<=viewerData.max_x && y>=viewerData.min_y && y<=viewerData.max_y) {
-				socketio.sockets.sockets[s].emit('tornado', data);
-			}
-		}
-	}
+    if (userId) {
+      const viewerData = infos.getMapData(userId);
+
+      if (viewerData && x >= viewerData.min_x && x <= viewerData.max_x &&
+          y >= viewerData.min_y && y <= viewerData.max_y) {
+        socket.emit('tornado', data);
+      }
+    }
+  }
 }
 
 function updateTime(data) {
-	socketio.sockets.emit('updateTime', data);
+  if (!io) return;
+  io.emit('updateTime', data);
 }
 
-function getSocketByUserId(user_id) {
-	for(s in socketio.handshaken) {
-		if(socketio.handshaken[s].user_id!=undefined && socketio.handshaken[s].user_id==user_id) {
-			return socketio.sockets.sockets[s];
-		}
-	}
-	
-	return null;
+function getSocketByUserId(userId) {
+  if (!io) return null;
+
+  for (const [socketId, socket] of io.sockets.sockets) {
+    if (socket.handshake?.user_id === userId) {
+      return socket;
+    }
+  }
+  return null;
 }
 
 function refreshMarketPrices() {
-	for(s in socketio.handshaken) {
-		if(socketio.handshaken[s].user_id!=undefined && socketio.sockets.sockets[s]!=undefined) {
-			globalSettings.refreshMarketPrices(socketio.sockets.sockets[s]);
-		}
-	}
+  if (!io) return;
+
+  for (const [socketId, socket] of io.sockets.sockets) {
+    if (socket.handshake?.user_id) {
+      globalSettings.refreshMarketPrices(socket);
+    }
+  }
 }
 
-
-exports.init = init;
-exports.refreshViewerMap = refreshViewerMap;
-exports.showTornado = showTornado;
-exports.updateTime = updateTime;
-exports.getSocketByUserId = getSocketByUserId;
-exports.refreshMarketPrices = refreshMarketPrices;
+export default {
+  init,
+  refreshViewerMap,
+  showTornado,
+  updateTime,
+  getSocketByUserId,
+  refreshMarketPrices
+};

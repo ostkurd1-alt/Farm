@@ -1,29 +1,52 @@
-var mysql = require('mysql');
-var interactive_timeout = 30;
-var wait_timeout = 30;
+import mysql from 'mysql2/promise';
+import 'dotenv/config';
 
-module.exports.getConnection = function() {
-	// On vérifie si la connexion est toujours active
-	if ((module.exports.connection) && (module.exports.connection._socket) && (module.exports.connection._socket.readable) && (module.exports.connection._socket.writable)) {
-		return module.exports.connection;
-	}
-	
-	// Sinon, on va re-créer une connection
-	var connection = mysql.createConnection({
-		host     : 'localhost',
-		user     : 'root',
-		password : 'root',
-		database : 'databaseName'
-	});
-	
-	// Puis se re-connecter
-	connection.connect(function(err) {
-		if (err) {
-			console.log('SQL connect error: ' + err);
-        }
-	});
-    module.exports.connection = connection;
-    return module.exports.connection;
+// إنشاء Pool للاتصالات - أكثر أماناً وكفاءة
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'world_of_farmcraft',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 30000
+});
+
+/**
+ * تنفيذ استعلام مع محدودات آمنة
+ * @param {string} sql - الاستعلام مع علامات الاستفهام
+ * @param {Array} params - المدخلات
+ */
+async function query(sql, params = []) {
+  const [results] = await pool.execute(sql, params);
+  return results;
 }
 
-module.exports.getConnection();
+/**
+ * الحصول على اتصال من Pool
+ */
+async function getConnection() {
+  return await pool.getConnection();
+}
+
+/**
+ * تنفيذ استعلام في معاملة (transaction)
+ */
+async function transaction(callback) {
+  const connection = await getConnection();
+  try {
+    await connection.beginTransaction();
+    const result = await callback(connection);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+export { pool, query, getConnection, transaction };

@@ -1,12 +1,15 @@
 CREATE TABLE wof_user (
 	id_user INT(7) NOT NULL AUTO_INCREMENT,
 	email VARCHAR(50) NOT NULL,
-	password VARCHAR(32) NOT NULL,
+	password VARCHAR(60) NOT NULL,
 	admin BOOLEAN NULL DEFAULT NULL,
 	difficulty ENUM('easy', 'medium', 'hard') NOT NULL,
 	life INT(3) NOT NULL,
 	money BIGINT(10) NOT NULL,
-	recovery VARCHAR(32) NULL DEFAULT NULL,
+	recovery VARCHAR(64) NULL DEFAULT NULL,
+	recovery_expires TIMESTAMP NULL DEFAULT NULL,
+	login_attempts INT(1) DEFAULT 0,
+	locked_until TIMESTAMP NULL DEFAULT NULL,
 	PRIMARY KEY (id_user),
 	UNIQUE(email))
 ENGINE=InnoDB DEFAULT CHARSET=utf8;

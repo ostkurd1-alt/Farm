@@ -1,228 +1,201 @@
-var db = require("./db");
-var settings = {};
-var tileType = new Array();
-var building = new Array();
-var weaponType = new Array();
-var marketPrice = new Array();
-var naturalEvent = new Array();
+import { query } from './db.js';
 
-function init() {
-	// On récupère les réglages
-	connection = db.getConnection();
-	connection.query('SELECT * FROM wof_settings WHERE id_settings=1', function(error, rows, fields) {
-		if(error || rows.length==0) {
-			console.log('Database error on retrieving settings');
-		}
-		else {
-			settings = rows[0];
-		}
-	});
-	
-	// On récupère les types de cases disponibles
-	connection = db.getConnection();
-	connection.query('SELECT id_tile_type id, name, price FROM wof_tile_type', function(error, rows, fields) {
-		if(error || rows.length==0) {
-			console.log('Database error on retrieving tile types');
-		}
-		else {
-			for(var i=0; i<rows.length; i++) {
-				tileType[rows[i].name] = rows[i];
-			}
-		}
-	});
-	
-	// On récupère les prix du marché concernant les plantes
-	connection = db.getConnection();
-	connection.query('SELECT type, price FROM wof_market', function(error, rows, fields) {
-		if(error || rows.length==0) {
-			console.log('Database error on retrieving market prices');
-		}
-		else {
-			for(var i=0; i<rows.length; i++) {
-				marketPrice[rows[i].type] = rows[i].price;
-			}
-		}
-	});
-	
-	// On récupère les informations concernant les bâtiments
-	connection = db.getConnection();
-	connection.query('SELECT type, running_cost, capacity, width, height FROM wof_building_settings', function(error, rows, fields) {
-		if(error || rows.length==0) {
-			console.log('Database error on retrieving tile types');
-		}
-		else {
-			for(var i=0; i<rows.length; i++) {
-				building[rows[i].type] = rows[i];
-			}
-		}
-	});
-	
-	// On récupère les types d'armes disponibles
-	connection = db.getConnection();
-	connection.query('SELECT id_weapon_type id, name, price FROM wof_weapon_type', function(error, rows, fields) {
-		if(error || rows.length==0) {
-			console.log('Database error on retrieving weapon types');
-		}
-		else {
-			for(var i=0; i<rows.length; i++) {
-				weaponType[rows[i].name] = rows[i];
-			}
-		}
-	});
-	
-	// On récupère les probabilités des évènements naturels
-	connection = db.getConnection();
-	connection.query('SELECT name, probability FROM wof_natural_event', function(error, rows, fields) {
-		if(error || rows.length==0) {
-			console.log('Database error on retrieving natural event probabilities');
-		}
-		else {
-			for(var i=0; i<rows.length; i++) {
-				naturalEvent[rows[i].name] = rows[i].probability;
-			}
-		}
-	});
+let settings = {};
+const tileType = {};
+const building = {};
+const weaponType = {};
+const marketPrice = {};
+const naturalEvent = {};
+
+async function init() {
+  try {
+    // تحميل الإعدادات
+    const settingsRows = await query('SELECT * FROM wof_settings WHERE id_settings = 1 LIMIT 1');
+    if (settingsRows.length > 0) {
+      settings = settingsRows[0];
+    }
+
+    // تحميل أنواع البلاط
+    const tileTypeRows = await query('SELECT id_tile_type AS id, name, price FROM wof_tile_type');
+    for (const row of tileTypeRows) {
+      tileType[row.name] = row;
+    }
+
+    // تحميل أسعار السوق
+    const marketRows = await query('SELECT type, price FROM wof_market');
+    for (const row of marketRows) {
+      marketPrice[row.type] = row.price;
+    }
+
+    // تحميل إعدادات المباني
+    const buildingRows = await query('SELECT type, running_cost, capacity, width, height FROM wof_building_settings');
+    for (const row of buildingRows) {
+      building[row.type] = row;
+    }
+
+    // تحميل أنواع الأسلحة
+    const weaponRows = await query('SELECT id_weapon_type AS id, name, price FROM wof_weapon_type');
+    for (const row of weaponRows) {
+      weaponType[row.name] = row;
+    }
+
+    // تحميل الأحداث الطبيعية
+    const eventRows = await query('SELECT name, probability FROM wof_natural_event');
+    for (const row of eventRows) {
+      naturalEvent[row.name] = row.probability;
+    }
+
+    console.log('Settings loaded successfully');
+
+  } catch (error) {
+    console.error('Failed to load settings:', error);
+    throw error;
+  }
 }
 
 function getData() {
-	return settings;
+  return { ...settings };
 }
 
 function getDisplayData(socket) {
-	var tmp = {tileWidth:settings.tileWidth, tileHeight:settings.tileHeight, mapSpeed:settings.mapSpeed, characterSpeed:settings.characterSpeed};
-	
-	if(socket==undefined) {
-		return tmp;
-	}
-	socket.emit('getDisplaySettingsAnswer', tmp);
+  const tmp = {
+    tileWidth: settings.tileWidth,
+    tileHeight: settings.tileHeight,
+    mapSpeed: settings.mapSpeed,
+    characterSpeed: settings.characterSpeed
+  };
+
+  if (socket === undefined) {
+    return tmp;
+  }
+  socket.emit('getDisplaySettingsAnswer', tmp);
 }
 
 function getInitialOwnedTilesDepth() {
-	return settings.initial_owned_tiles_depth;
+  return settings.initial_owned_tiles_depth;
 }
 
 function getInitialMoneyByDifficulty(difficulty) {
-	if(difficulty=='easy') {
-		return settings.initial_money;
-	}
-	else if(difficulty=='medium') {
-		return Math.ceil(0.5*settings.initial_money);
-	}
-	else {
-		return Math.ceil(0.1*settings.initial_money);
-	}
+  if (difficulty === 'easy') {
+    return settings.initial_money;
+  } else if (difficulty === 'medium') {
+    return Math.ceil(0.5 * settings.initial_money);
+  } else {
+    return Math.ceil(0.1 * settings.initial_money);
+  }
 }
 
 function getTileTypeId(name) {
-	return (tileType[name]!=undefined)?tileType[name].id:null;
+  return tileType[name]?.id ?? null;
 }
 
 function getSpawnRadius() {
-	return (settings.spawn_radius!=undefined)?settings.spawn_radius:null;
+  return settings.spawn_radius ?? null;
 }
 
 function getTilePrice(name) {
-	return (tileType[name]!=undefined)?tileType[name].price:null;
+  return tileType[name]?.price ?? null;
 }
 
 function getPrices(socket) {
-	// On envoi les prix réguliers des items
-	var data = {};
-	data.silo = tileType['silo'].price;
-	data.barn = tileType['barn'].price;
-	data.coldStorage = tileType['coldStorage'].price;
-	data.waterize = 10;
-	data.fertilize = 20;
-	data.corn = tileType['corn'].price;
-	data.tomato = tileType['tomato'].price;
-	data.wheat = tileType['wheat'].price;
-	data.baseballBat = weaponType['baseballBat'].price;
-	data.chainsaw = weaponType['chainsaw'].price;
-	data.ak47 = weaponType['ak47'].price;
-	
-	socket.emit('getPricesAnswer', data);
+  const data = {
+    silo: tileType['silo']?.price || 0,
+    barn: tileType['barn']?.price || 0,
+    coldStorage: tileType['coldStorage']?.price || 0,
+    waterize: 10,
+    fertilize: 20,
+    corn: tileType['corn']?.price || 0,
+    tomato: tileType['tomato']?.price || 0,
+    wheat: tileType['wheat']?.price || 0,
+    baseballBat: weaponType['baseballBat']?.price || 0,
+    chainsaw: weaponType['chainsaw']?.price || 0,
+    ak47: weaponType['ak47']?.price || 0
+  };
+
+  socket.emit('getPricesAnswer', data);
 }
 
 function getMarketPricesData() {
-	return marketPrice;
+  return { ...marketPrice };
 }
 
 function refreshMarketPrices(socket) {
-	var data = {};
-	data.corn = marketPrice[tileType['corn'].id];
-	data.tomato = marketPrice[tileType['tomato'].id];
-	data.wheat = marketPrice[tileType['wheat'].id];
-	
-	socket.emit('refreshMarketPrices', data);
+  const data = {
+    corn: marketPrice[tileType['corn']?.id] || 0,
+    tomato: marketPrice[tileType['tomato']?.id] || 0,
+    wheat: marketPrice[tileType['wheat']?.id] || 0
+  };
+
+  socket.emit('refreshMarketPrices', data);
 }
 
 function setTileMarketPrice(type, price) {
-	if(marketPrice[type]!=undefined) {
-		marketPrice[type] = price;
-	}
+  if (marketPrice[type] !== undefined) {
+    marketPrice[type] = price;
+  }
 }
 
 function getBuildingRunningCost(name) {
-	return (tileType[name]!=undefined && building[tileType[name].id]!=undefined)?building[tileType[name].id].running_cost:null;
+  const tileId = tileType[name]?.id;
+  return building[tileId]?.running_cost ?? null;
 }
 
 function getBuildingCapacity(name) {
-	return (tileType[name]!=undefined && building[tileType[name].id]!=undefined)?building[tileType[name].id].capacity:null;
+  const tileId = tileType[name]?.id;
+  return building[tileId]?.capacity ?? null;
 }
 
 function getBuildingSize(name) {
-	return (tileType[name]!=undefined && building[tileType[name].id]!=undefined)?{width:building[tileType[name].id].width, height:building[tileType[name].id].height}:null;
+  const tileId = tileType[name]?.id;
+  return building[tileId] ? { width: building[tileId].width, height: building[tileId].height } : null;
 }
 
 function getBuildingSizeSocket(socket) {
-	var data = {};
-	data.silo = {width:building[tileType['silo'].id].width, height:building[tileType['silo'].id].height};
-	data.barn = {width:building[tileType['barn'].id].width, height:building[tileType['barn'].id].height};
-	data.coldStorage = {width:building[tileType['coldStorage'].id].width, height:building[tileType['coldStorage'].id].height};
-	
-	socket.emit('getBuildingSizeAnswer', data);
+  const data = {
+    silo: getBuildingSize('silo'),
+    barn: getBuildingSize('barn'),
+    coldStorage: getBuildingSize('coldStorage')
+  };
+
+  socket.emit('getBuildingSizeAnswer', data);
 }
 
 function getWeaponPrice(name) {
-	return (weaponType[name]!=undefined)?weaponType[name].price:null;
+  return weaponType[name]?.price ?? null;
 }
 
 function getInitialLife() {
-	return (settings.initial_life!=undefined)?settings.initial_life:100;
+  return settings.initial_life ?? 100;
 }
 
 function isBuilding(name) {
-	if(tileType[name]==undefined) {
-		return false;
-	}
-	if(building[tileType[name].id]!=undefined) {
-		return true;
-	}
-	return false;
+  const tileId = tileType[name]?.id;
+  return building[tileId] !== undefined;
 }
 
 function getNaturalEventProbabilities() {
-	return naturalEvent;
+  return { ...naturalEvent };
 }
 
-
-exports.init = init;
-exports.getData = getData;
-exports.getDisplayData = getDisplayData;
-exports.getInitialOwnedTilesDepth = getInitialOwnedTilesDepth;
-exports.getInitialMoneyByDifficulty = getInitialMoneyByDifficulty;
-exports.getTileTypeId = getTileTypeId;
-exports.getSpawnRadius = getSpawnRadius;
-exports.getTilePrice = getTilePrice;
-exports.getPrices = getPrices;
-exports.getMarketPricesData = getMarketPricesData;
-exports.setTileMarketPrice = setTileMarketPrice;
-exports.refreshMarketPrices = refreshMarketPrices;
-exports.getBuildingRunningCost = getBuildingRunningCost;
-exports.getBuildingCapacity = getBuildingCapacity;
-exports.getBuildingSize = getBuildingSize;
-exports.getBuildingSizeSocket = getBuildingSizeSocket;
-exports.getWeaponPrice = getWeaponPrice;
-exports.getInitialLife = getInitialLife;
-exports.isBuilding = isBuilding;
-exports.getNaturalEventProbabilities = getNaturalEventProbabilities;
+export default {
+  init,
+  getData,
+  getDisplayData,
+  getInitialOwnedTilesDepth,
+  getInitialMoneyByDifficulty,
+  getTileTypeId,
+  getSpawnRadius,
+  getTilePrice,
+  getPrices,
+  getMarketPricesData,
+  setTileMarketPrice,
+  refreshMarketPrices,
+  getBuildingRunningCost,
+  getBuildingCapacity,
+  getBuildingSize,
+  getBuildingSizeSocket,
+  getWeaponPrice,
+  getInitialLife,
+  isBuilding,
+  getNaturalEventProbabilities
+};

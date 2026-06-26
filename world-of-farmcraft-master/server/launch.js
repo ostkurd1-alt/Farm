@@ -1,3 +1,1 @@
-var server = require('./lib/server');
-
-server.start();
+import './lib/server.js';

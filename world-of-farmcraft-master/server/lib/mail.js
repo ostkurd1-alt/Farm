@@ -1,40 +1,79 @@
-var nodemailer = require('nodemailer');
+import nodemailer from 'nodemailer';
+import 'dotenv/config';
 
-// On crée un pool de connections SMTP
-var smtpTransport = nodemailer.createTransport("SMTP", {
-    service: "Gmail",
-    auth: {
-        user: "yourEmail@gmail.com",
-        pass: "yourPassword"
-    }
+// إعداد النقل البريدي باستخدام متغيرات البيئة
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  }
 });
 
-function send(to, subject, text, html) {
-	// On indique les données de l'entête
-	var mailOptions = {
-	    from: "World of Farmcraft <yourEmail@gmail.com>",
-	    to: to,
-	    subject: subject,
-	    text: text,
-	    html: html
-	}
-	
-	// Puis on envoi l'email
-	smtpTransport.sendMail(mailOptions, function(error, response) {
-		if(error) {
-			console.log(error);
-		}
-		else {
-			console.log("Message sent: " + response.message);
-		}
-	});
+// التحقق من الاتصال
+transporter.verify((error, success) => {
+  if (error) {
+    console.error('SMTP connection error:', error.message);
+  } else {
+    console.log('SMTP server ready');
+  }
+});
+
+/**
+ * إرسال بريد إلكتروني
+ */
+async function send(to, subject, text, html) {
+  if (!to || !subject) {
+    throw new Error('Email recipient and subject are required');
+  }
+
+  const mailOptions = {
+    from: `"World of Farmcraft" <${process.env.SMTP_USER}>`,
+    to: to,
+    subject: subject,
+    text: text,
+    html: html
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`Email sent: ${info.messageId}`);
+    return info;
+  } catch (error) {
+    console.error('Email send error:', error);
+    throw error;
+  }
 }
 
-function passwordLost(email, token) {
-	var text = "Hello Folks,\n\nIf you've recently lost your password, you can reset it by going to: http://localhost:1337/resetPassword?token="+token+" \nIf not, you can ignore this email.\n\n Have a nice day :)\nWorld of Farmcraft team.";
-	var html = "Hello Folks,<br /><br />If you've recently lost your password, you can <a href='http://localhost:1337/resetPassword?token="+token+"'>reset it</a>.<br />If not, you can ignore this email.<br /><br />Have a nice day :)<br />World of Farmcraft team.";
-	
-	send(email, "Password recovery", text, html);
+/**
+ * إرسال بريد استعادة كلمة المرور
+ */
+async function passwordLost(email, token) {
+  const baseUrl = process.env.BASE_URL || 'http://localhost:1337';
+  const resetUrl = `${baseUrl}/resetPassword?token=${token}`;
+
+  const text = `Hello,
+
+If you've recently lost your password, you can reset it by visiting:
+${resetUrl}
+
+If you did not request this, please ignore this email.
+
+Best regards,
+World of Farmcraft Team`;
+
+  const html = `
+    <p>Hello,</p>
+    <p>If you've recently lost your password, you can <a href="${resetUrl}">reset it here</a>.</p>
+    <p>If you did not request this, please ignore this email.</p>
+    <br>
+    <p>Best regards,<br>World of Farmcraft Team</p>
+  `;
+
+  await send(email, 'Password Recovery', text, html);
 }
 
-exports.passwordLost = passwordLost;
+export { send, passwordLost };
+export default { send, passwordLost };
